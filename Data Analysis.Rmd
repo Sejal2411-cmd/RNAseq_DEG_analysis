@@ -1,0 +1,195 @@
+---
+Name- Sejal Sharma
+title: "Data Analysis Project"
+output: html_document
+date: "2025-11-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+#Data
+```{r}
+data <- read.delim("GGSC620_RNAseq.tsv", sep="\t", header=TRUE)
+data <- data[, 1:8]
+head(data)
+```
+
+
+#DESeq2 Differential Gene Expression
+```{r}
+countdata <- round(countdata)
+
+rownames(data) <- data$emsbl_id
+countdata <- data[, 3:8]
+
+# Convert decimals to integers
+countdata <- round(countdata)
+
+condition <- factor(c("Con","Con","Con","KD","KD","KD"))
+coldata <- data.frame(row.names = colnames(countdata),
+                      condition)
+
+dds <- DESeqDataSetFromMatrix(countData = countdata,
+                              colData = coldata,
+                              design = ~ condition)
+dds <- DESeq(dds)
+res <- results(dds)
+head(res)
+
+```
+
+#Downstream Pathway Enrichment
+```{r}
+install.packages("BiocManager")
+BiocManager::install("clusterProfiler")
+BiocManager::install("org.Hs.eg.db")
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+gene_symbols <- DEGs$symbol
+entrez_ids <- bitr(gene_symbols,
+                   fromType="SYMBOL",
+                   toType="ENTREZID",
+                   OrgDb="org.Hs.eg.db")
+
+ego <- enrichGO(gene          = entrez_ids$ENTREZID,
+                OrgDb         = org.Hs.eg.db,
+                keyType       = "ENTREZID",
+                readable      = TRUE,
+                ont           = "BP",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.05)
+
+head(ego)
+
+barplot(ego, showCategory=15)
+ggsave("GO_enrichment_barplot.png", width=7, height=7)
+
+```
+
+
+#Volcano Plot
+```{r}
+res_filt <- res[!is.na(res$padj), ]   # remove NA rows
+res_filt$log10padj <- -log10(res_filt$padj)
+gg_volcano <- ggplot(res_filt, aes(log2FoldChange, log10padj)) +
+  geom_point(alpha=0.6) +
+  theme_minimal() +
+  labs(title="Volcano Plot",
+       x="log2 Fold Change",
+       y="-log10 Adjusted p-value")
+
+
+```
+
+#Labelled Volcano Plot
+```{r}
+# Remove NA padj values
+res_filt <- res[!is.na(res$padj), ]
+
+# Add gene symbols to DE results
+res_filt$symbol <- data$symbol[match(rownames(res_filt), data$emsbl_id)]
+
+# Define DEGs
+DEGs <- res_filt[res_filt$padj < 0.05 & abs(res_filt$log2FoldChange) > 1, ]
+
+res_filt$log10padj <- -log10(res_filt$padj)
+
+gg_volcano <- ggplot(res_filt, aes(log2FoldChange, log10padj)) +
+  geom_point(alpha=0.6) +
+  geom_point(data=DEGs, color="red", alpha=0.8) +
+  geom_text_repel(data = DEGs,
+                  aes(label = symbol),
+                  size = 3,
+                  max.overlaps = 15) +
+  theme_minimal() +
+  labs(title = "Volcano Plot with Gene Labels",
+       x = "log2 Fold Change",
+       y = "-log10 Adjusted p-value")
+
+gg_volcano
+ggsave("volcano_plot_labeled.png", gg_volcano, width=7, height=7)
+
+```
+
+
+
+Boxplot of Raw Counts
+```{r}
+boxplot(countdata,
+        main="Expression Distribution (Raw Counts)",
+        col="lightblue",
+        las=2,
+        ylab="Expression",
+        outline=TRUE)
+
+ggsave("boxplot_expression.png", width=6, height=6)
+
+```
+
+#Histogram of Expression Values
+```{r}
+gg_hist <- ggplot(stack(countdata), aes(values)) +
+  geom_histogram(bins=50) +
+  theme_minimal() +
+  labs(title="Histogram of Gene Expression",
+       x="Expression",
+       y="Frequency")
+
+gg_hist
+ggsave("histogram_expression.png", gg_hist, width=6, height=6)
+
+```
+
+#Output DE results to CSV
+```{r}
+write.csv(as.data.frame(res), "DESeq2_results.csv")
+
+```
+
+#Brief Explanation
+
+fter performing differential gene expression analysis between KD (knockdown) and Control samples using DESeq2, several genes appeared as potentially interesting based on their log2 fold changes, p-values, and adjusted p-values.
+
+Although only a few genes reached strong significance after multiple-testing correction (padj < 0.05), the raw p-values still highlight biologically relevant changes worth noting.
+
+🔍 1. ENSG00000000419 – Moderate Downregulation (log2FC = -0.39)
+
+This gene showed a raw p-value = 0.038, suggesting moderate significance before correction.
+
+The negative fold change indicates it is downregulated in KD samples.
+
+Although the adjusted p-value (padj = 0.24) is not below 0.05, the consistent direction and low p-value make it a candidate for follow-up validation.
+
+🔍 2. ENSG00000001036 – Mild Downregulation (log2FC = -0.30)
+
+Raw p-value = 0.088.
+
+This gene shows mild downregulation in KD.
+
+While not statistically significant after adjustment, it may be biologically relevant depending on the pathway targeted by the knockdown.
+3. ENSG00000000971 – Upregulated (log2FC = +0.52)
+
+This gene shows noticeable upregulation in KD samples.
+
+p-value = 0.22, padj not significant.
+However, its effect size suggests it may be responding to the knockdown pathway, potentially compensatory upregulation.
+🔍 4. General Observation of Expression Patterns
+Across the dataset, many genes show small fold-change shifts (±0.3 to ±0.6) but lack strong significance after correction. This is common in small-sample RNA-seq (n = 3 per group), where statistical power is limited.
+Still, the volcano plot highlights a subset of genes trending toward differential expression, which may become significant with higher sample size or replication
+
+
+
+
+
+
+
+
